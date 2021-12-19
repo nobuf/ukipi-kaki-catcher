@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>ukipi-kaki-catcher</title>
+        <style>
+            body {
+                margin: 0;
+            }
+
+            .container {
+                display: grid;
+                place-items: center;
+                margin: 20px 0;
+            }
+
+            canvas {
+                border: 1px solid #CCC;
+                background-color: transparent;
+            }
+
+            .video-container {
+                transform: scaleX(-1);
+                position: relative;
+                width: 640px;
+                margin: 20px auto;
+            }
+            #video-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+            }
+        </style>
+        <script src="face-api/face-api.min.js"></script>
+        <script>
+            const defaultItemSpeed = 10;
+            const poopRatio = 85;
+            const requiredScoreToLevelUp = 50;
+
+            class Player {
+                constructor() {
+                    this.image = new Image();
+                    this.image.src = 'images/ukipi-zaru.png';
+                    this.width = 112;
+                    this.height = 200;
+                    this.x = 0;
+                    this.y = 0;
+                }
+            }
+
+            class Item {
+                constructor() {
+                    this.image = new Image();
+                    this.width = 0;
+                    this.height = 0;
+                    this.x = 0;
+                    this.y = -1 * this.height;
+                    this.score = 0;
+                }
+            }
+
+            class RegularKaki extends Item {
+                constructor() {
+                    super();
+                    this.image.src = 'images/kaki.png';
+                    this.width = 100;
+                    this.height = 100;
+                    this.score = 10;
+                }
+            }
+
+            class Poop extends Item {
+                constructor() {
+                    super();
+                    this.image.src = 'images/pile-of-poo.png';
+                    this.width = 100;
+                    this.height = 100;
+                    this.score = -1;
+                }
+            }
+
+            class Game {
+                constructor() {
+                    this.score = 0;
+                    this.level = 1;
+                    this.gameOver = false;
+                }
+            }
+
+            function generateItem() {
+                if (Math.floor(Math.random() * 100) % 100 < poopRatio) {
+                    return new Poop();
+                }
+
+                return new RegularKaki();
+            }
+
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const stage = document.getElementById('stage');
+                const context = stage.getContext('2d');
+
+                context.font = '20px sans-serif';
+
+                const items = [];
+                let game;
+                let player;
+
+                const videoInput = document.getElementById('video-input');
+
+                function renderItems(items) {
+                    for (const item of items) {
+                        context.drawImage(item.image, item.x, item.y, item.width, item.height);
+                    }
+                }
+
+                function renderPlayer(player) {
+                    context.drawImage(player.image, player.x, player.y, player.width, player.height);
+                }
+
+                function renderGame() {
+                    context.clearRect(0, 0, stage.width, stage.height);
+                    context.fillText('Score: ' + game.score, 30, 40);
+
+                    renderItems(items);
+                    renderPlayer(player);
+
+                    window.requestAnimationFrame(renderGame);
+                }
+
+                function moveItem(item, step) {
+                    item.y += step;
+                }
+
+                function isInBottom(item) {
+                    return item.y > stage.height;
+                }
+
+                function isCaughtByPlayer(item) {
+                    const itemTop = item.y;
+                    const itemBottom = item.y + item.height;
+                    const itemRight = item.x + item.width;
+                    const itemLeft = item.x;
+
+                    const playerTop = player.y;
+                    const playerBottom = player.y + player.height;
+                    const playerRight = player.x + player.width;
+                    const playerLeft = player.x;
+
+                    return itemLeft <= playerRight
+                        && playerLeft <= itemRight
+                        && itemTop <= playerBottom
+                        && playerTop <= itemBottom;
+                }
+
+                function movePlayerLeft(player) {
+                    player.x -= 2;
+                }
+
+                function movePlayerRight(player) {
+                    player.x += 2;
+                }
+
+                function movePlayer(player, x) {
+                    player.x = x;
+                }
+
+                function endGame() {
+                    game.gameOver = true;
+                    player.width = 106;
+                    player.height = 195;
+                    player.image.src = 'images/ukipi-oops.png';
+                }
+
+                function shouldEndGame(item) {
+                    return item.score < 0;
+                }
+
+                function updateGame() {
+                    if (game.gameOver) {
+                        return;
+                    }
+
+                    for (const item of items) {
+                        moveItem(item, defaultItemSpeed + game.level);
+                    }
+
+                    for (const index in items) {
+                        if (isInBottom(items[index])) {
+                            items.splice(index, 1);
+                        } else if (isCaughtByPlayer(items[index])) {
+                            if (shouldEndGame(items[index])) {
+                                endGame();
+                                break;
+                            }
+
+                            game.score += items[index].score;
+                            items.splice(index, 1);
+                        }
+                    }
+
+                    if (game.score / requiredScoreToLevelUp >= game.level) {
+                        game.level += 1;
+                    }
+
+                    // Up to one item at the same time
+                    if (items.length === 0) {
+                        const item = generateItem();
+                        item.x = Math.min(stage.width - 100, Math.random() * stage.width);
+                        items.push(item);
+                    }
+
+                    window.setTimeout(updateGame, 30);
+                }
+
+                async function runFaceController(input) {
+                    if (game.gameOver) {
+                        return;
+                    }
+
+                    const videoOverlay = document.getElementById('video-overlay');
+                    const videoContext = videoOverlay.getContext('2d');
+                    const detections = await faceapi.detectAllFaces(input, new faceapi.TinyFaceDetectorOptions());
+
+                    for (const detection of detections) {
+                        const newPlayerPosistion = stage.width - detection.box.x - 200;
+                        // if the new position hasn't changed much then ignore
+                        if (Math.abs(newPlayerPosistion - player.x) < 5) {
+                            continue;
+                        }
+
+                        // Use the first detected face
+                        movePlayer(player, newPlayerPosistion);
+                        break;
+                    }
+
+                    videoContext.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
+                    faceapi.draw.drawDetections(videoOverlay, detections);
+
+                    setTimeout(() => runFaceController(input), 30);
+                }
+
+                function startGame() {
+                    game = new Game();
+                    player = new Player();
+                    player.x = stage.width / 2;
+                    player.y = stage.height - player.height;
+
+                    items.pop();
+
+                    const firstItem = new RegularKaki();
+                    firstItem.x = stage.width / 2;
+                    items.push(firstItem);
+
+                    runFaceController(videoInput);
+                    updateGame();
+                    window.requestAnimationFrame(renderGame);
+                }
+
+                async function init() {
+                    await faceapi.nets.tinyFaceDetector.loadFromUri('/face-api');
+
+                    startGame();
+                }
+
+                videoInput.addEventListener('play', () => {
+                    init();
+                });
+
+                // This triggers `play`
+                navigator.getUserMedia(
+                    { video: {} },
+                    stream => videoInput.srcObject = stream,
+                    err => console.error(err),
+                );
+
+                window.addEventListener('keydown', (e) => {
+                    if (e.keyCode === 13 && game.gameOver === true) {
+                        startGame();
+                    }
+                });
+            });
+        </script>
+    </head>
+    <body>
+        <div class="container">
+            <canvas id="stage" width="640" height="480"></canvas>
+        </div>
+
+        <div class="video-container">
+            <video id="video-input" autoplay muted></video>
+            <canvas id="video-overlay" width="640" height="480">
+        </div>
+    </body>
+</html>
