@@ -37,6 +37,16 @@
             const poopRatio = 85;
             const requiredScoreToLevelUp = 50;
 
+            const bgm = new Audio();
+            bgm.src = 'sounds/SuperMarioBros.mp3';
+            bgm.loop = true;
+
+            const caughtItemSoundSrc = 'sounds/smb_coin.wav';
+
+            const gameOverSound = new Audio();
+            gameOverSound.src = 'sounds/smb_mariodie.wav';
+
+
             class Player {
                 constructor() {
                     this.image = new Image();
@@ -122,8 +132,9 @@
                     context.clearRect(0, 0, stage.width, stage.height);
                     context.fillText('Score: ' + game.score, 30, 40);
 
-                    renderItems(items);
+                    // 手前に置きたいものをあとで呼ぶ
                     renderPlayer(player);
+                    renderItems(items);
 
                     window.requestAnimationFrame(renderGame);
                 }
@@ -142,7 +153,8 @@
                     const itemRight = item.x + item.width;
                     const itemLeft = item.x;
 
-                    const playerTop = player.y;
+                    const withHand = item.score < 0 ? 20 : 100; // ザルで受け取る
+                    const playerTop = player.y + withHand;
                     const playerBottom = player.y + player.height;
                     const playerRight = player.x + player.width;
                     const playerLeft = player.x;
@@ -166,6 +178,8 @@
                 }
 
                 function endGame() {
+                    bgm.pause();
+                    gameOverSound.play();
                     game.gameOver = true;
                     player.width = 106;
                     player.height = 195;
@@ -193,6 +207,11 @@
                                 endGame();
                                 break;
                             }
+
+                            // Needs to create a new instance
+                            const caughtItemSound = new Audio();
+                            caughtItemSound.src = caughtItemSoundSrc;
+                            caughtItemSound.play();
 
                             game.score += items[index].score;
                             items.splice(index, 1);
@@ -241,6 +260,8 @@
                 }
 
                 function startGame() {
+                    bgm.play();
+
                     game = new Game();
                     player = new Player();
                     player.x = stage.width / 2;
