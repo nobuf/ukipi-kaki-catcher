@@ -33,26 +33,31 @@
         </style>
         <script src="face-api/face-api.min.js"></script>
         <script>
-            const defaultItemSpeed = 10;
-            const poopRatio = 85;
+            const defaultItemSpeed = 7;
+            const poopRatio = 5;
             const requiredScoreToLevelUp = 50;
 
             const bgm = new Audio();
-            bgm.src = 'sounds/SuperMarioBros.mp3';
+            bgm.src = 'sounds/bgm.mp3';
             bgm.loop = true;
 
-            const caughtItemSoundSrc = 'sounds/smb_coin.wav';
+            const caughtItemSoundSrc = 'sounds/coin.wav';
 
             const gameOverSound = new Audio();
-            gameOverSound.src = 'sounds/smb_mariodie.wav';
+            gameOverSound.src = 'sounds/gameover.wav';
 
+            const zoom = 0.7;
+            const playerWidth = 112 * zoom;
+            const playerHeight = 200 * zoom;
+            const itemWidth = 100 * zoom;
+            const itemHeight = 100 * zoom;
 
             class Player {
                 constructor() {
                     this.image = new Image();
                     this.image.src = 'images/ukipi-zaru.png';
-                    this.width = 112;
-                    this.height = 200;
+                    this.width = playerWidth;
+                    this.height = playerHeight;
                     this.x = 0;
                     this.y = 0;
                 }
@@ -73,8 +78,8 @@
                 constructor() {
                     super();
                     this.image.src = 'images/kaki.png';
-                    this.width = 100;
-                    this.height = 100;
+                    this.width = itemWidth;
+                    this.height = itemHeight;
                     this.score = 10;
                 }
             }
@@ -83,8 +88,8 @@
                 constructor() {
                     super();
                     this.image.src = 'images/pile-of-poo.png';
-                    this.width = 100;
-                    this.height = 100;
+                    this.width = itemWidth;
+                    this.height = itemHeight;
                     this.score = -1;
                 }
             }
@@ -112,9 +117,10 @@
 
                 context.font = '20px sans-serif';
 
+                const faceQueue = [];
                 const items = [];
+                const players = [];
                 let game;
-                let player;
 
                 const videoInput = document.getElementById('video-input');
 
@@ -124,8 +130,10 @@
                     }
                 }
 
-                function renderPlayer(player) {
-                    context.drawImage(player.image, player.x, player.y, player.width, player.height);
+                function renderPlayers(players) {
+                    for (const player of players) {
+                        context.drawImage(player.image, player.x, player.y, player.width, player.height);
+                    }
                 }
 
                 function renderGame() {
@@ -133,7 +141,7 @@
                     context.fillText('Score: ' + game.score, 30, 40);
 
                     // 手前に置きたいものをあとで呼ぶ
-                    renderPlayer(player);
+                    renderPlayers(players);
                     renderItems(items);
 
                     window.requestAnimationFrame(renderGame);
@@ -147,7 +155,7 @@
                     return item.y > stage.height;
                 }
 
-                function isCaughtByPlayer(item) {
+                function isCaughtByPlayer(item, player) {
                     const itemTop = item.y;
                     const itemBottom = item.y + item.height;
                     const itemRight = item.x + item.width;
@@ -181,9 +189,10 @@
                     bgm.pause();
                     gameOverSound.play();
                     game.gameOver = true;
-                    player.width = 106;
-                    player.height = 195;
-                    player.image.src = 'images/ukipi-oops.png';
+
+                    for (const index in players) {
+                        players[index].image.src = 'images/ukipi-oops.png';
+                    }
                 }
 
                 function shouldEndGame(item) {
@@ -199,22 +208,24 @@
                         moveItem(item, defaultItemSpeed + game.level);
                     }
 
-                    for (const index in items) {
-                        if (isInBottom(items[index])) {
-                            items.splice(index, 1);
-                        } else if (isCaughtByPlayer(items[index])) {
-                            if (shouldEndGame(items[index])) {
-                                endGame();
-                                break;
+                    for (const player of players) {
+                        for (const index in items) {
+                            if (isInBottom(items[index])) {
+                                items.splice(index, 1);
+                            } else if (isCaughtByPlayer(items[index], player)) {
+                                if (shouldEndGame(items[index])) {
+                                    endGame();
+                                    break;
+                                }
+
+                                // Needs to create a new instance
+                                const caughtItemSound = new Audio();
+                                caughtItemSound.src = caughtItemSoundSrc;
+                                caughtItemSound.play();
+
+                                game.score += items[index].score;
+                                items.splice(index, 1);
                             }
-
-                            // Needs to create a new instance
-                            const caughtItemSound = new Audio();
-                            caughtItemSound.src = caughtItemSoundSrc;
-                            caughtItemSound.play();
-
-                            game.score += items[index].score;
-                            items.splice(index, 1);
                         }
                     }
 
@@ -241,31 +252,52 @@
                     const videoContext = videoOverlay.getContext('2d');
                     const detections = await faceapi.detectAllFaces(input, new faceapi.TinyFaceDetectorOptions());
 
-                    for (const detection of detections) {
-                        const newPlayerPosistion = stage.width - detection.box.x - 200;
-                        // if the new position hasn't changed much then ignore
-                        if (Math.abs(newPlayerPosistion - player.x) < 5) {
-                            continue;
+                    const moveClosestPlayer = (newPlayerPosistion) => {
+                        const closestPlayers = [];
+                        for (const index in players) {
+                            closestPlayers.push({index: index, distance: Math.abs(newPlayerPosistion - players[index].x)});
                         }
+                        closestPlayers.sort((a, b) => {
+                            return a.distance - b.distance;
+                        });
+                        movePlayer(players[closestPlayers[0].index], newPlayerPosistion);
+                    };
 
-                        // Use the first detected face
-                        movePlayer(player, newPlayerPosistion);
-                        break;
+                    if (detections.length > players.length) {
+                        // いきなり追加すると分身ができてしまうときがある
+                        if (faceQueue.length >= 3) {
+                            for (let i = 0; i < detections.length - players.length; i++) {
+                                const player = new Player();
+                                player.x = stage.width / 2;
+                                player.y = stage.height - player.height;
+                                players.push(player);
+                            }
+                            faceQueue.pop();
+                        } else {
+                            faceQueue.push(1);
+                        }
+                    } else {
+                        faceQueue.pop();
+                    }
+
+                    if (players.length > 0) {
+                        for (const detection of detections) {
+                            moveClosestPlayer(stage.width - detection.box.x - detection.box.width / 2 - playerWidth / 2);
+                        }
                     }
 
                     videoContext.clearRect(0, 0, videoOverlay.width, videoOverlay.height);
                     faceapi.draw.drawDetections(videoOverlay, detections);
 
-                    setTimeout(() => runFaceController(input), 30);
+                    setTimeout(() => runFaceController(input), 15);
                 }
 
                 function startGame() {
                     bgm.play();
 
                     game = new Game();
-                    player = new Player();
-                    player.x = stage.width / 2;
-                    player.y = stage.height - player.height;
+
+                    players.splice(0, players.length);
 
                     items.pop();
 
